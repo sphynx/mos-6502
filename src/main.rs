@@ -1,9 +1,15 @@
 const MEM_SIZE: usize = 64 * 1024;
 
-use Op::*;
-use AddrMode::*;
+use std::env;
+use std::fs;
 
-#[allow(dead_code)]
+use AddrMode::*;
+use Op::*;
+
+pub struct Mem {
+    data: [u8; MEM_SIZE],
+}
+
 pub struct CPU {
     /// 64k of addressable memory. First page, i.e. first 256 bytes
     /// ($0000 - $00FF) is called 'Zero Page' and is used in address
@@ -11,7 +17,7 @@ pub struct CPU {
     /// bytes are reserved for addresses of non-masked interrupts
     /// handler, power on reset location and BRK/interrupt request
     /// handler.
-    pub mem: [u8; MEM_SIZE],
+    pub mem: Mem,
 
     /// Instruction pointer (aka Program counter). Points to the
     /// *next* instruction to be executed.
@@ -47,11 +53,11 @@ pub struct CPU {
     pub reg_status: u8,
 }
 
-#[allow(dead_code)]
-struct Instr(Op, AddrMode);
+#[derive(Debug)]
+pub struct Instr(Op, AddrMode);
 
-#[allow(dead_code)]
-enum Op {
+#[derive(Debug)]
+pub enum Op {
     ADC,
     AND,
     ASL,
@@ -110,8 +116,8 @@ enum Op {
     TYA,
 }
 
-#[allow(dead_code)]
-enum AddrMode {
+#[derive(Debug)]
+pub enum AddrMode {
     Impl,
     Abs,
     AbsX,
@@ -127,7 +133,6 @@ enum AddrMode {
 }
 
 impl Instr {
-    #[allow(dead_code)]
     pub fn decode(op_code: u8) -> Self {
         match op_code {
             0x00 => Instr(BRK, Impl),
@@ -297,28 +302,75 @@ impl Instr {
             0xFD => Instr(SBC, AbsX),
             0xFE => Instr(INC, AbsX),
 
-            _ => panic!("unknown op code: {}", op_code)
-
+            _ => panic!("unknown op code: {}", op_code),
         }
     }
 }
 
-impl CPU {
-    pub fn load(&mut self, prog: &[u8]) {
-        // FIXME: where the programs are usually loaded?
-        // For now let's load it at 0.
-        let addr = 0;
-        let len = prog.len();
-        assert!(addr + len < MEM_SIZE);
-        self.mem[addr..addr + len].copy_from_slice(prog);
-    }
-
-    pub fn run(&mut self) {
-        // let op = decode();
-        //execute(op);
+pub fn offset(mode: AddrMode) -> usize {
+    match mode {
+        Impl => 0,
+        Abs => 2,
+        AbsX => 2,
+        AbsY => 2,
+        Imm => 1,
+        Ind => 2,
+        IndX => 1,
+        IndY => 1,
+        Rel => 1,
+        Zpg => 1,
+        ZpgX => 1,
+        ZpgY => 1,
     }
 }
 
+pub fn disasm(bytes: &[u8]) {
+    let mut ip = 0;
+    let len = bytes.len();
+    while ip < len {
+        let op_code = bytes[ip];
+        ip += 1;
+        let instr = Instr::decode(op_code);
+        println!("{:?}", instr);
+        ip += offset(instr.1);
+    }
+}
+
+impl CPU {
+    pub fn new() -> Self {
+        CPU {
+            ip: 0x0000_u16,
+            sp: 0xFF,
+            reg_acc: 0x00,
+            reg_x: 0x00,
+            reg_y: 0x00,
+            reg_status: 0b_0000_0000,
+            mem: Mem {
+                data: [0; MEM_SIZE],
+            },
+        }
+    }
+
+    pub fn load(&mut self, addr: usize, prog: &[u8]) {
+        let len = prog.len();
+        assert!(addr + len < MEM_SIZE);
+        self.mem.data[addr..addr + len].copy_from_slice(prog);
+    }
+
+    pub fn run(&mut self) {}
+}
+
 fn main() {
-    println!("Hello, world!");
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        panic!("usage: {} <program_file>", &args[0]);
+    }
+
+    let file = &args[1];
+    let bytes: Vec<u8> = fs::read(file).unwrap();
+    disasm(&bytes);
+
+    let mut cpu = CPU::new();
+    cpu.load(0, &bytes);
+    cpu.run();
 }
