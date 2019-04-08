@@ -2,6 +2,7 @@ const MEM_SIZE: usize = 64 * 1024;
 
 use std::env;
 use std::fs;
+use std::process;
 
 use AddrMode::*;
 use Op::*;
@@ -130,6 +131,16 @@ pub enum AddrMode {
     Zpg,
     ZpgX,
     ZpgY,
+}
+
+#[derive(Debug)]
+pub enum Operand {
+    Address(u16),
+    // special treatment for Ind mode only used in Jmp
+    JmpAddress(u16),
+    Byte(u8),
+    Offset(i8),
+    Implicit,
 }
 
 impl Instr {
@@ -307,7 +318,7 @@ impl Instr {
     }
 }
 
-pub fn offset(mode: AddrMode) -> usize {
+pub fn offset(mode: &AddrMode) -> u16 {
     match mode {
         Impl => 0,
         Abs => 2,
@@ -332,7 +343,7 @@ pub fn disasm(bytes: &[u8]) {
         ip += 1;
         let instr = Instr::decode(op_code);
         println!("{:?}", instr);
-        ip += offset(instr.1);
+        ip += offset(&instr.1) as usize;
     }
 }
 
@@ -357,13 +368,320 @@ impl CPU {
         self.mem.data[addr..addr + len].copy_from_slice(prog);
     }
 
-    pub fn run(&mut self) {}
+    pub fn run(&mut self) {
+        // FIXME: when to stop? :)
+        loop {
+            // fetch next instruction
+            let op_code = self.mem.data[self.ip as usize];
+            self.ip = self.ip.wrapping_add(1);
+
+            // decode
+            let instr = Instr::decode(op_code);
+            let operand = self.resolve_operand(&instr.1);
+            self.ip = self.ip.wrapping_add(offset(&instr.1));
+
+            // execute
+            self.execute(instr.0, operand);
+        }
+    }
+
+    pub fn execute(&mut self, op: Op, operand: Operand) {
+        match op {
+            LDA => {
+                match operand {
+                    Operand::Address(addr) => self.reg_acc = self.mem.data[addr as usize],
+                    Operand::Byte(val) => self.reg_acc = val,
+                    o => panic!("execute: LDA: wrong operand: {:?}", o),
+                }
+                self.update_zero_flag(self.reg_acc == 0);
+                self.update_negative_flag(self.reg_acc);
+            }
+
+            STA => {
+                match operand {
+                    Operand::Address(addr) => self.mem.data[addr as usize] = self.reg_acc,
+                    o => panic!("execute: STA: wrong operand: {:?}", o),
+                }
+            }
+
+            ADC => {
+                let x = match operand {
+                    Operand::Byte(val) => val,
+                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    o => panic!("execute: ADC: wrong operand: {:?}", o),
+                };
+
+                if self.get_decimal_flag() {
+                    let bcd_a = BCD::new(self.reg_acc);
+                    let bcd_x = BCD::new(x);
+                    let bcd_sum = bcd_a.to_decimal() + bcd_x.to_decimal();
+                    let carry = bcd_sum > 99;
+                    let result_dec = bcd_sum % 100;
+                    let res = BCD::from_decimal(result_dec).bits;
+                    self.reg_acc = res;
+                    self.update_carry_flag(carry);
+                    self.update_zero_flag(self.reg_acc == 0 && !carry);
+                    // We don't update overflow and negative flags,
+                    // since it's not properly documented whether how
+                    // they should be updated.
+                } else {
+                    let (sum, carry) = x.overflowing_add(self.reg_acc);
+                    let (_, overflow) = (x as i8).overflowing_add(self.reg_acc as i8);
+                    self.reg_acc = sum;
+                    self.update_carry_flag(carry);
+                    self.update_overflow_flag(overflow);
+                    self.update_zero_flag(self.reg_acc == 0 && !carry);
+                    self.update_negative_flag(self.reg_acc);
+                }
+            }
+
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn resolve_operand(&self, mode: &AddrMode) -> Operand {
+        match mode {
+            Impl => Operand::Implicit,
+            Abs => {
+                let lo = self.mem.data[self.ip as usize];
+                let hi = self.mem.data[(self.ip.wrapping_add(1)) as usize];
+                let addr = ((hi as u16) << 8) | (lo as u16);
+                Operand::Address(addr)
+            }
+            AbsX => {
+                let lo = self.mem.data[self.ip as usize];
+                let hi = self.mem.data[(self.ip.wrapping_add(1)) as usize];
+                let addr = ((hi as u16) << 8) | (lo as u16);
+                Operand::Address(addr.wrapping_add(self.reg_x as u16))
+            }
+            AbsY => {
+                let lo = self.mem.data[self.ip as usize];
+                let hi = self.mem.data[(self.ip.wrapping_add(1)) as usize];
+                let addr = ((hi as u16) << 8) | (lo as u16);
+                Operand::Address(addr.wrapping_add(self.reg_y as u16))
+            }
+            Imm => Operand::Byte(self.mem.data[self.ip as usize]),
+            Ind => {
+                // This addressing mode is only used for JMP. And it
+                // is buggy: an original 6502 does not correctly fetch
+                // the target address if the indirect vector falls on
+                // a page boundary (e.g. $xxFF where xx is any value
+                // from $00 to $FF). In this case it fetches the LSB
+                // from $xxFF as expected but takes the MSB from
+                // $xx00.
+
+                let indir_lo = self.mem.data[self.ip as usize];
+                let indir_hi = self.mem.data[(self.ip.wrapping_add(1)) as usize];
+                let indir_addr = ((indir_hi as u16) << 8) | (indir_lo as u16);
+                let lo = self.mem.data[indir_addr as usize];
+
+                // I support that buggy behaviour here:
+                let hi = if indir_lo != 0xFF {
+                    self.mem.data[indir_addr.wrapping_add(1) as usize]
+                } else {
+                    let buggy_hi_addr = (indir_hi as u16) << 8;
+                    self.mem.data[buggy_hi_addr as usize]
+                };
+                let addr = ((hi as u16) << 8) | (lo as u16);
+                Operand::JmpAddress(addr)
+            }
+            IndX => {
+                let indir_lo = self.mem.data[self.ip as usize];
+                let indir_addr = indir_lo.wrapping_add(self.reg_x);
+                let lo = self.mem.data[indir_addr as usize];
+                let hi = self.mem.data[indir_addr.wrapping_add(1) as usize];
+                let addr = ((hi as u16) << 8) | (lo as u16);
+                Operand::Address(addr)
+            }
+            IndY => {
+                let indir_addr = self.mem.data[self.ip as usize];
+                let lo = self.mem.data[indir_addr as usize];
+                let hi = self.mem.data[indir_addr.wrapping_add(1) as usize];
+                let addr = ((hi as u16) << 8) | (lo as u16);
+                Operand::Address(addr.wrapping_add(self.reg_y as u16))
+            }
+            Rel => Operand::Offset(self.mem.data[self.ip as usize] as i8),
+            Zpg => Operand::Address(self.mem.data[self.ip as usize] as u16),
+            ZpgX => {
+                let addr = self.mem.data[self.ip as usize].wrapping_add(self.reg_x);
+                Operand::Address(addr as u16)
+            }
+            ZpgY => {
+                let addr = self.mem.data[self.ip as usize].wrapping_add(self.reg_y);
+                Operand::Address(addr as u16)
+            }
+        }
+    }
+
+    // FIXME: it looks like we need some macro to simplify this
+    // boilerplate.
+    pub fn set_negative_flag(&mut self) {
+        set_bit(&mut self.reg_status, 7);
+    }
+
+    pub fn get_negative_flag(&mut self) -> bool {
+        get_bit(self.reg_status, 7)
+    }
+
+    pub fn clear_negative_flag(&mut self) {
+        clear_bit(&mut self.reg_status, 7)
+    }
+
+    pub fn set_overflow_flag(&mut self) {
+        set_bit(&mut self.reg_status, 6);
+    }
+
+    pub fn get_overflow_flag(&mut self) -> bool {
+        get_bit(self.reg_status, 6)
+    }
+
+    pub fn clear_overflow_flag(&mut self) {
+        clear_bit(&mut self.reg_status, 6)
+    }
+
+    pub fn set_break_flag(&mut self) {
+        set_bit(&mut self.reg_status, 4);
+    }
+
+    pub fn get_break_flag(&mut self) -> bool {
+        get_bit(self.reg_status, 4)
+    }
+
+    pub fn clear_break_flag(&mut self) {
+        clear_bit(&mut self.reg_status, 4)
+    }
+
+    pub fn set_decimal_flag(&mut self) {
+        set_bit(&mut self.reg_status, 3);
+    }
+
+    pub fn get_decimal_flag(&mut self) -> bool {
+        get_bit(self.reg_status, 3)
+    }
+
+    pub fn clear_decimal_flag(&mut self) {
+        clear_bit(&mut self.reg_status, 3)
+    }
+
+    pub fn set_interrupt_flag(&mut self) {
+        set_bit(&mut self.reg_status, 2);
+    }
+
+    pub fn get_interrupt_flag(&mut self) -> bool {
+        get_bit(self.reg_status, 2)
+    }
+
+    pub fn clear_interrupt_flag(&mut self) {
+        clear_bit(&mut self.reg_status, 2)
+    }
+
+    pub fn set_zero_flag(&mut self) {
+        set_bit(&mut self.reg_status, 1);
+    }
+
+    pub fn get_zero_flag(&mut self) -> bool {
+        get_bit(self.reg_status, 1)
+    }
+
+    pub fn clear_zero_flag(&mut self) {
+        clear_bit(&mut self.reg_status, 1);
+    }
+
+    pub fn set_carry_flag(&mut self) {
+        set_bit(&mut self.reg_status, 0);
+    }
+
+    pub fn get_carry_flag(&mut self) -> bool {
+        get_bit(self.reg_status, 0)
+    }
+
+    pub fn clear_carry_flag(&mut self) {
+        clear_bit(&mut self.reg_status, 0)
+    }
+
+    pub fn update_zero_flag(&mut self, zero: bool) {
+        if zero {
+            self.set_zero_flag();
+        } else {
+            self.clear_zero_flag();
+        }
+    }
+
+    pub fn update_negative_flag(&mut self, val: u8) {
+        if val >= 0b_1000_0000 {
+            self.set_negative_flag();
+        } else {
+            self.clear_negative_flag();
+        }
+    }
+
+    pub fn update_carry_flag(&mut self, carry: bool) {
+        if carry {
+            self.set_carry_flag();
+        } else {
+            self.clear_carry_flag();
+        }
+    }
+
+    pub fn update_overflow_flag(&mut self, overflow: bool) {
+        if overflow {
+            self.set_overflow_flag();
+        } else {
+            self.clear_overflow_flag();
+        }
+    }
+
+
+}
+
+fn set_bit(val: &mut u8, bit: usize) {
+    *val |= 1_u8 << bit;
+}
+
+#[allow(dead_code)]
+fn clear_bit(val: &mut u8, bit: usize) {
+    *val &= !(1_u8 << bit);
+}
+
+fn get_bit(val: u8, bit: usize) -> bool {
+    ((val >> bit) & 1_u8) != 0
+}
+
+#[allow(dead_code)]
+fn toggle_bit(val: &mut u8, bit: usize) {
+    *val ^= 1_u8 << bit;
+}
+
+pub struct BCD {
+    pub bits: u8,
+}
+
+impl BCD {
+    pub fn new(bits: u8) -> Self {
+        BCD { bits }
+    }
+
+    pub fn to_decimal(&self) -> u8 {
+        let hi = self.bits >> 4;
+        let lo = self.bits & 0b_0000_1111;
+        assert!(hi <= 9);
+        assert!(lo <= 9);
+        10 * hi + lo
+    }
+
+    pub fn from_decimal(dec: u8) -> Self {
+        assert!(dec <= 99);
+        let hi_digit: u8 = dec / 10;
+        let lo_digit: u8 = dec % 10;
+        BCD { bits: (hi_digit << 4) | lo_digit }
+    }
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        panic!("usage: {} <program_file>", &args[0]);
+        println!("usage: {} <program_file>", &args[0]);
+        process::exit(1);
     }
 
     let file = &args[1];
