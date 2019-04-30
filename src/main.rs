@@ -421,7 +421,8 @@ impl CPU {
                 if self.get_decimal_flag() {
                     let bcd_a = BCD::new(self.reg_acc);
                     let bcd_x = BCD::new(x);
-                    let bcd_sum = bcd_a.to_decimal() + bcd_x.to_decimal();
+                    let c = if self.get_carry_flag() { 1 } else { 0 };
+                    let bcd_sum = bcd_a.to_decimal() + bcd_x.to_decimal() + c;
                     let carry = bcd_sum > 99;
                     let result_dec = bcd_sum % 100;
                     let res = BCD::from_decimal(result_dec).bits;
@@ -434,9 +435,19 @@ impl CPU {
                     self.update_carry_flag(carry);
                     self.update_zero_flag(self.reg_acc == 0 && !carry);
                 } else {
-                    let (sum, carry) = x.overflowing_add(self.reg_acc);
-                    let (_, overflow) = (x as i8).overflowing_add(self.reg_acc as i8);
-                    self.reg_acc = sum;
+                    let a = self.reg_acc;
+                    let c: u16 = if self.get_carry_flag() { 1 } else { 0 };
+
+                    let u_res: u16 = (x as u16).wrapping_add(a as u16).wrapping_add(c);
+                    let signed_res: i16 = ((x as i8) as i16)
+                        .wrapping_add((a as i8) as i16)
+                        .wrapping_add(c as i16);
+
+                    let carry = u_res > std::u8::MAX as u16;
+                    let overflow =
+                        signed_res > std::i8::MAX as i16 || signed_res < std::i8::MIN as i16;
+
+                    self.reg_acc = (u_res & 0xFF) as u8;
                     self.update_carry_flag(carry);
                     self.update_overflow_flag(overflow);
                     self.update_zero_flag(self.reg_acc == 0 && !carry);
@@ -727,6 +738,65 @@ mod tests {
     fn adc_2() {
         let c = test_adc(13, 211, true);
         assert_eq!(225, c.reg_acc);
-        assert!(!c.get_carry_flag());
+        assert_eq!(c.get_carry_flag(), false);
     }
+
+    #[test]
+    fn adc_3() {
+        let c = test_adc(254, 6, true);
+        assert_eq!(5, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), true);
+    }
+
+    #[test]
+    fn adc_4() {
+        let c = test_adc(5, 7, false);
+        assert_eq!(12, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_overflow_flag(), false);
+    }
+
+    #[test]
+    fn adc_5() {
+        let c = test_adc(127, 2, false);
+        assert_eq!(-127_i8 as u8, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_overflow_flag(), true);
+    }
+
+    #[test]
+    fn adc_6() {
+        let c = test_adc(5, -3_i8 as u8, false);
+        assert_eq!(2, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), true);
+        assert_eq!(c.get_overflow_flag(), false);
+    }
+
+    #[test]
+    fn adc_7() {
+        let c = test_adc(5, -7_i8 as u8, false);
+        assert_eq!(-2_i8 as u8, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_overflow_flag(), false);
+    }
+
+    #[test]
+    fn adc_8() {
+        let c = test_adc(-5_i8 as u8, -7_i8 as u8, false);
+        assert_eq!(-12_i8 as u8, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), true);
+        assert_eq!(c.get_overflow_flag(), false);
+    }
+
+    #[test]
+    fn adc_9() {
+        let c = test_adc(-66_i8 as u8, -65_i8 as u8, false);
+        assert_eq!(125, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), true);
+        assert_eq!(c.get_overflow_flag(), true);
+    }
+
+    // TODO: add tests for decimal addition
+
+    // TODO: add test for infamous JMP boundary
 }
