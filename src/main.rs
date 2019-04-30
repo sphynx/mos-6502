@@ -347,6 +347,7 @@ pub fn disasm(bytes: &[u8]) {
     }
 }
 
+#[allow(unused)]
 impl CPU {
     pub fn new() -> Self {
         CPU {
@@ -385,7 +386,15 @@ impl CPU {
         }
     }
 
-    pub fn execute(&mut self, op: Op, operand: Operand) {
+    pub fn dump(&self) -> String {
+        // Something like: "A:00 X:00 Y:00 P:24 SP:FD IP:C000"
+        format!(
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} IP:{:04X}",
+            self.reg_acc, self.reg_x, self.reg_y, self.reg_status, self.sp, self.ip
+        )
+    }
+
+    fn execute(&mut self, op: Op, operand: Operand) {
         match op {
             LDA => {
                 match operand {
@@ -397,12 +406,10 @@ impl CPU {
                 self.update_negative_flag(self.reg_acc);
             }
 
-            STA => {
-                match operand {
-                    Operand::Address(addr) => self.mem.data[addr as usize] = self.reg_acc,
-                    o => panic!("execute: STA: wrong operand: {:?}", o),
-                }
-            }
+            STA => match operand {
+                Operand::Address(addr) => self.mem.data[addr as usize] = self.reg_acc,
+                o => panic!("execute: STA: wrong operand: {:?}", o),
+            },
 
             ADC => {
                 let x = match operand {
@@ -419,11 +426,13 @@ impl CPU {
                     let result_dec = bcd_sum % 100;
                     let res = BCD::from_decimal(result_dec).bits;
                     self.reg_acc = res;
-                    self.update_carry_flag(carry);
-                    self.update_zero_flag(self.reg_acc == 0 && !carry);
+
                     // We don't update overflow and negative flags,
                     // since it's not properly documented whether how
                     // they should be updated.
+
+                    self.update_carry_flag(carry);
+                    self.update_zero_flag(self.reg_acc == 0 && !carry);
                 } else {
                     let (sum, carry) = x.overflowing_add(self.reg_acc);
                     let (_, overflow) = (x as i8).overflowing_add(self.reg_acc as i8);
@@ -439,7 +448,7 @@ impl CPU {
         }
     }
 
-    pub fn resolve_operand(&self, mode: &AddrMode) -> Operand {
+    fn resolve_operand(&self, mode: &AddrMode) -> Operand {
         match mode {
             Impl => Operand::Implicit,
             Abs => {
@@ -515,91 +524,91 @@ impl CPU {
 
     // FIXME: it looks like we need some macro to simplify this
     // boilerplate.
-    pub fn set_negative_flag(&mut self) {
+    fn set_negative_flag(&mut self) {
         set_bit(&mut self.reg_status, 7);
     }
 
-    pub fn get_negative_flag(&mut self) -> bool {
+    fn get_negative_flag(&self) -> bool {
         get_bit(self.reg_status, 7)
     }
 
-    pub fn clear_negative_flag(&mut self) {
+    fn clear_negative_flag(&mut self) {
         clear_bit(&mut self.reg_status, 7)
     }
 
-    pub fn set_overflow_flag(&mut self) {
+    fn set_overflow_flag(&mut self) {
         set_bit(&mut self.reg_status, 6);
     }
 
-    pub fn get_overflow_flag(&mut self) -> bool {
+    fn get_overflow_flag(&self) -> bool {
         get_bit(self.reg_status, 6)
     }
 
-    pub fn clear_overflow_flag(&mut self) {
+    fn clear_overflow_flag(&mut self) {
         clear_bit(&mut self.reg_status, 6)
     }
 
-    pub fn set_break_flag(&mut self) {
+    fn set_break_flag(&mut self) {
         set_bit(&mut self.reg_status, 4);
     }
 
-    pub fn get_break_flag(&mut self) -> bool {
+    fn get_break_flag(&self) -> bool {
         get_bit(self.reg_status, 4)
     }
 
-    pub fn clear_break_flag(&mut self) {
+    fn clear_break_flag(&mut self) {
         clear_bit(&mut self.reg_status, 4)
     }
 
-    pub fn set_decimal_flag(&mut self) {
+    fn set_decimal_flag(&mut self) {
         set_bit(&mut self.reg_status, 3);
     }
 
-    pub fn get_decimal_flag(&mut self) -> bool {
+    fn get_decimal_flag(&self) -> bool {
         get_bit(self.reg_status, 3)
     }
 
-    pub fn clear_decimal_flag(&mut self) {
+    fn clear_decimal_flag(&mut self) {
         clear_bit(&mut self.reg_status, 3)
     }
 
-    pub fn set_interrupt_flag(&mut self) {
+    fn set_interrupt_flag(&mut self) {
         set_bit(&mut self.reg_status, 2);
     }
 
-    pub fn get_interrupt_flag(&mut self) -> bool {
+    fn get_interrupt_flag(&self) -> bool {
         get_bit(self.reg_status, 2)
     }
 
-    pub fn clear_interrupt_flag(&mut self) {
+    fn clear_interrupt_flag(&mut self) {
         clear_bit(&mut self.reg_status, 2)
     }
 
-    pub fn set_zero_flag(&mut self) {
+    fn set_zero_flag(&mut self) {
         set_bit(&mut self.reg_status, 1);
     }
 
-    pub fn get_zero_flag(&mut self) -> bool {
+    fn get_zero_flag(&self) -> bool {
         get_bit(self.reg_status, 1)
     }
 
-    pub fn clear_zero_flag(&mut self) {
+    fn clear_zero_flag(&mut self) {
         clear_bit(&mut self.reg_status, 1);
     }
 
-    pub fn set_carry_flag(&mut self) {
+    fn set_carry_flag(&mut self) {
         set_bit(&mut self.reg_status, 0);
     }
 
-    pub fn get_carry_flag(&mut self) -> bool {
+    fn get_carry_flag(&self) -> bool {
         get_bit(self.reg_status, 0)
     }
 
-    pub fn clear_carry_flag(&mut self) {
+    fn clear_carry_flag(&mut self) {
         clear_bit(&mut self.reg_status, 0)
     }
 
-    pub fn update_zero_flag(&mut self, zero: bool) {
+    fn update_zero_flag(&mut self, zero: bool) {
         if zero {
             self.set_zero_flag();
         } else {
@@ -607,7 +616,7 @@ impl CPU {
         }
     }
 
-    pub fn update_negative_flag(&mut self, val: u8) {
+    fn update_negative_flag(&mut self, val: u8) {
         if val >= 0b_1000_0000 {
             self.set_negative_flag();
         } else {
@@ -615,7 +624,7 @@ impl CPU {
         }
     }
 
-    pub fn update_carry_flag(&mut self, carry: bool) {
+    fn update_carry_flag(&mut self, carry: bool) {
         if carry {
             self.set_carry_flag();
         } else {
@@ -623,15 +632,13 @@ impl CPU {
         }
     }
 
-    pub fn update_overflow_flag(&mut self, overflow: bool) {
+    fn update_overflow_flag(&mut self, overflow: bool) {
         if overflow {
             self.set_overflow_flag();
         } else {
             self.clear_overflow_flag();
         }
     }
-
-
 }
 
 fn set_bit(val: &mut u8, bit: usize) {
@@ -673,7 +680,9 @@ impl BCD {
         assert!(dec <= 99);
         let hi_digit: u8 = dec / 10;
         let lo_digit: u8 = dec % 10;
-        BCD { bits: (hi_digit << 4) | lo_digit }
+        BCD {
+            bits: (hi_digit << 4) | lo_digit,
+        }
     }
 }
 
@@ -691,4 +700,33 @@ fn main() {
     let mut cpu = CPU::new();
     cpu.load(0, &bytes);
     cpu.run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_adc(a: u8, m: u8, c: bool) -> CPU {
+        let mut cpu = CPU::new();
+        cpu.reg_acc = a;
+        if c {
+            cpu.set_carry_flag();
+        }
+        cpu.execute(ADC, Operand::Byte(m));
+        cpu
+    }
+
+    #[test]
+    fn adc_1() {
+        let c = test_adc(1, 1, true);
+        assert_eq!("A:03 X:00 Y:00 P:00 SP:FF IP:0000", c.dump());
+        assert_eq!(3, c.reg_acc);
+    }
+
+    #[test]
+    fn adc_2() {
+        let c = test_adc(13, 211, true);
+        assert_eq!(225, c.reg_acc);
+        assert!(!c.get_carry_flag());
+    }
 }
