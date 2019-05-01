@@ -727,6 +727,17 @@ mod tests {
         cpu
     }
 
+    fn test_dec_adc(a: u8, m: u8, c: bool) -> CPU {
+        let mut cpu = CPU::new();
+        cpu.set_decimal_flag();
+        cpu.reg_acc = a;
+        if c {
+            cpu.set_carry_flag();
+        }
+        cpu.execute(ADC, Operand::Byte(m));
+        cpu
+    }
+
     #[test]
     fn adc_1() {
         let c = test_adc(1, 1, true);
@@ -796,7 +807,29 @@ mod tests {
         assert_eq!(c.get_overflow_flag(), true);
     }
 
-    // TODO: add tests for decimal addition
+    #[test]
+    fn adc_10() {
+        let c = test_adc(0, 0, false);
+        assert_eq!(0, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_zero_flag(), true);
+    }
+
+    #[test]
+    fn adc_11() {
+        let c = test_adc(0, 0, false);
+        assert_eq!(0, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_zero_flag(), true);
+    }
+
+    #[test]
+    fn adc_dec_1() {
+        let c = test_dec_adc(0x79, 0x14, false);
+        assert_eq!(0x93, c.reg_acc);
+    }
 
     // TODO: add test for infamous JMP boundary
 }
