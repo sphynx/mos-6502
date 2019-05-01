@@ -1,2 +1,5 @@
+.DS_Store
+asm/
+rom/
 /target
 **/*.rs.bk
