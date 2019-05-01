@@ -411,20 +411,21 @@ impl CPU {
                 o => panic!("execute: STA: wrong operand: {:?}", o),
             },
 
-            ADC => {
-                let x = match operand {
+            SBC => {
+                let m = match operand {
                     Operand::Byte(val) => val,
                     Operand::Address(addr) => self.mem.data[addr as usize],
-                    o => panic!("execute: ADC: wrong operand: {:?}", o),
+                    o => panic!("execute: SBC: wrong operand: {:?}", o),
                 };
 
                 if self.get_decimal_flag() {
                     let bcd_a = BCD::new(self.reg_acc);
-                    let bcd_x = BCD::new(x);
-                    let c = if self.get_carry_flag() { 1 } else { 0 };
-                    let bcd_sum = bcd_a.to_decimal() + bcd_x.to_decimal() + c;
-                    let carry = bcd_sum > 99;
-                    let result_dec = bcd_sum % 100;
+                    let bcd_x = BCD::new(m);
+                    // TODO: should we actually handle carry flag in this way?
+                    let c = if self.get_carry_flag() { 0 } else { 1 };
+                    let bcd_diff = bcd_a.to_decimal() - bcd_x.to_decimal() + c;
+                    let carry = (bcd_diff as i8) < 0;
+                    let result_dec = bcd_diff % 100;
                     let res = BCD::from_decimal(result_dec).bits;
                     self.reg_acc = res;
 
@@ -433,29 +434,59 @@ impl CPU {
                     // they should be updated.
 
                     self.update_carry_flag(carry);
-                    self.update_zero_flag(self.reg_acc == 0 && !carry);
+                    self.update_zero_flag(self.reg_acc == 0);
                 } else {
-                    let a = self.reg_acc;
-                    let c: u16 = if self.get_carry_flag() { 1 } else { 0 };
-
-                    let u_res: u16 = (x as u16).wrapping_add(a as u16).wrapping_add(c);
-                    let signed_res: i16 = ((x as i8) as i16)
-                        .wrapping_add((a as i8) as i16)
-                        .wrapping_add(c as i16);
-
-                    let carry = u_res > std::u8::MAX as u16;
-                    let overflow =
-                        signed_res > std::i8::MAX as i16 || signed_res < std::i8::MIN as i16;
-
-                    self.reg_acc = (u_res & 0xFF) as u8;
-                    self.update_carry_flag(carry);
-                    self.update_overflow_flag(overflow);
-                    self.update_zero_flag(self.reg_acc == 0 && !carry);
-                    self.update_negative_flag(self.reg_acc);
+                    self.adc(!m);
                 }
             }
 
+            ADC => {
+                let m = match operand {
+                    Operand::Byte(val) => val,
+                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    o => panic!("execute: ADC: wrong operand: {:?}", o),
+                };
+                self.adc(m);
+            }
+
             _ => unimplemented!(),
+        }
+    }
+
+    fn adc(&mut self, x: u8) {
+        if self.get_decimal_flag() {
+            let bcd_a = BCD::new(self.reg_acc);
+            let bcd_x = BCD::new(x);
+            let c = if self.get_carry_flag() { 1 } else { 0 };
+            let bcd_sum = bcd_a.to_decimal() + bcd_x.to_decimal() + c;
+            let carry = bcd_sum > 99;
+            let result_dec = bcd_sum % 100;
+            let res = BCD::from_decimal(result_dec).bits;
+            self.reg_acc = res;
+
+            // We don't update overflow and negative flags,
+            // since it's not properly documented whether how
+            // they should be updated.
+
+            self.update_carry_flag(carry);
+            self.update_zero_flag(self.reg_acc == 0);
+        } else {
+            let a = self.reg_acc;
+            let c: u16 = if self.get_carry_flag() { 1 } else { 0 };
+
+            let u_res: u16 = (x as u16).wrapping_add(a as u16).wrapping_add(c);
+            let signed_res: i16 = ((x as i8) as i16)
+                .wrapping_add((a as i8) as i16)
+                .wrapping_add(c as i16);
+
+            let carry = u_res > std::u8::MAX as u16;
+            let overflow = signed_res > std::i8::MAX as i16 || signed_res < std::i8::MIN as i16;
+
+            self.reg_acc = (u_res & 0xFF) as u8;
+            self.update_carry_flag(carry);
+            self.update_overflow_flag(overflow);
+            self.update_zero_flag(self.reg_acc == 0);
+            self.update_negative_flag(self.reg_acc);
         }
     }
 
@@ -533,8 +564,6 @@ impl CPU {
         }
     }
 
-    // FIXME: it looks like we need some macro to simplify this
-    // boilerplate.
     fn set_negative_flag(&mut self) {
         set_bit(&mut self.reg_status, 7);
     }
@@ -738,6 +767,27 @@ mod tests {
         cpu
     }
 
+    fn test_sbc(a: u8, m: u8, c: bool) -> CPU {
+        let mut cpu = CPU::new();
+        cpu.reg_acc = a;
+        if c {
+            cpu.set_carry_flag();
+        }
+        cpu.execute(SBC, Operand::Byte(m));
+        cpu
+    }
+
+    fn test_dec_sbc(a: u8, m: u8, c: bool) -> CPU {
+        let mut cpu = CPU::new();
+        cpu.set_decimal_flag();
+        cpu.reg_acc = a;
+        if c {
+            cpu.set_carry_flag();
+        }
+        cpu.execute(SBC, Operand::Byte(m));
+        cpu
+    }
+
     #[test]
     fn adc_1() {
         let c = test_adc(1, 1, true);
@@ -757,6 +807,7 @@ mod tests {
         let c = test_adc(254, 6, true);
         assert_eq!(5, c.reg_acc);
         assert_eq!(c.get_carry_flag(), true);
+        assert_eq!(c.get_negative_flag(), false);
     }
 
     #[test]
@@ -765,6 +816,7 @@ mod tests {
         assert_eq!(12, c.reg_acc);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_negative_flag(), false);
     }
 
     #[test]
@@ -773,6 +825,7 @@ mod tests {
         assert_eq!(-127_i8 as u8, c.reg_acc);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), true);
+        assert_eq!(c.get_negative_flag(), true);
     }
 
     #[test]
@@ -781,6 +834,7 @@ mod tests {
         assert_eq!(2, c.reg_acc);
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_negative_flag(), false);
     }
 
     #[test]
@@ -789,6 +843,7 @@ mod tests {
         assert_eq!(-2_i8 as u8, c.reg_acc);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
     }
 
     #[test]
@@ -797,6 +852,7 @@ mod tests {
         assert_eq!(-12_i8 as u8, c.reg_acc);
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
     }
 
     #[test]
@@ -814,13 +870,13 @@ mod tests {
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_zero_flag(), true);
+        assert_eq!(c.get_negative_flag(), false);
     }
 
     #[test]
     fn adc_11() {
-        let c = test_adc(0, 0, false);
+        let c = test_adc(-10_i8 as u8, 10, false);
         assert_eq!(0, c.reg_acc);
-        assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_zero_flag(), true);
     }
@@ -829,6 +885,30 @@ mod tests {
     fn adc_dec_1() {
         let c = test_dec_adc(0x79, 0x14, false);
         assert_eq!(0x93, c.reg_acc);
+    }
+
+    #[test]
+    fn sbc_1() {
+        let c = test_sbc(5, 3, true);
+        assert_eq!(2, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), true);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), false);
+    }
+
+    #[test]
+    fn sbc_2() {
+        let c = test_sbc(5, 6, true);
+        assert_eq!(-1_i8 as u8, c.reg_acc);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
+    }
+
+    #[test]
+    fn sbc_dec_1() {
+        let c = test_dec_sbc(0x44, 0x29, true);
+        assert_eq!(0x15, c.reg_acc);
     }
 
     // TODO: add test for infamous JMP boundary
