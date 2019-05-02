@@ -411,6 +411,15 @@ impl CPU {
                 o => panic!("execute: STA: wrong operand: {:?}", o),
             },
 
+            ADC => {
+                let m = match operand {
+                    Operand::Byte(val) => val,
+                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    o => panic!("execute: ADC: wrong operand: {:?}", o),
+                };
+                self.adc(m);
+            }
+
             SBC => {
                 let m = match operand {
                     Operand::Byte(val) => val,
@@ -440,13 +449,37 @@ impl CPU {
                 }
             }
 
-            ADC => {
+            AND => {
                 let m = match operand {
                     Operand::Byte(val) => val,
                     Operand::Address(addr) => self.mem.data[addr as usize],
-                    o => panic!("execute: ADC: wrong operand: {:?}", o),
+                    o => panic!("execute: AND: wrong operand: {:?}", o),
                 };
-                self.adc(m);
+                self.reg_acc = self.reg_acc & m;
+                self.update_zero_flag(self.reg_acc == 0);
+                self.update_negative_flag(self.reg_acc);
+            }
+
+            ORA => {
+                let m = match operand {
+                    Operand::Byte(val) => val,
+                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    o => panic!("execute: AND: wrong operand: {:?}", o),
+                };
+                self.reg_acc = self.reg_acc | m;
+                self.update_zero_flag(self.reg_acc == 0);
+                self.update_negative_flag(self.reg_acc);
+            }
+
+            EOR => {
+                let m = match operand {
+                    Operand::Byte(val) => val,
+                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    o => panic!("execute: AND: wrong operand: {:?}", o),
+                };
+                self.reg_acc = self.reg_acc ^ m;
+                self.update_zero_flag(self.reg_acc == 0);
+                self.update_negative_flag(self.reg_acc);
             }
 
             _ => unimplemented!(),
@@ -788,24 +821,43 @@ mod tests {
         cpu
     }
 
+    fn test_and(a: u8, m: u8) -> CPU {
+        test_bin_op(AND, a, m)
+    }
+
+    fn test_ora(a: u8, m: u8) -> CPU {
+        test_bin_op(ORA, a, m)
+    }
+
+    fn test_eor(a: u8, m: u8) -> CPU {
+        test_bin_op(EOR, a, m)
+    }
+
+    fn test_bin_op(op: Op, a: u8, m: u8) -> CPU {
+        let mut cpu = CPU::new();
+        cpu.reg_acc = a;
+        cpu.execute(op, Operand::Byte(m));
+        cpu
+    }
+
     #[test]
     fn adc_1() {
         let c = test_adc(1, 1, true);
-        assert_eq!("A:03 X:00 Y:00 P:00 SP:FF IP:0000", c.dump());
-        assert_eq!(3, c.reg_acc);
+        assert_eq!(c.dump(), "A:03 X:00 Y:00 P:00 SP:FF IP:0000");
+        assert_eq!(c.reg_acc, 3);
     }
 
     #[test]
     fn adc_2() {
         let c = test_adc(13, 211, true);
-        assert_eq!(225, c.reg_acc);
+        assert_eq!(c.reg_acc, 225);
         assert_eq!(c.get_carry_flag(), false);
     }
 
     #[test]
     fn adc_3() {
         let c = test_adc(254, 6, true);
-        assert_eq!(5, c.reg_acc);
+        assert_eq!(c.reg_acc, 5);
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_negative_flag(), false);
     }
@@ -813,7 +865,7 @@ mod tests {
     #[test]
     fn adc_4() {
         let c = test_adc(5, 7, false);
-        assert_eq!(12, c.reg_acc);
+        assert_eq!(c.reg_acc, 12);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_negative_flag(), false);
@@ -822,7 +874,7 @@ mod tests {
     #[test]
     fn adc_5() {
         let c = test_adc(127, 2, false);
-        assert_eq!(-127_i8 as u8, c.reg_acc);
+        assert_eq!(c.reg_acc, -127_i8 as u8);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), true);
         assert_eq!(c.get_negative_flag(), true);
@@ -831,7 +883,7 @@ mod tests {
     #[test]
     fn adc_6() {
         let c = test_adc(5, -3_i8 as u8, false);
-        assert_eq!(2, c.reg_acc);
+        assert_eq!(c.reg_acc, 2);
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_negative_flag(), false);
@@ -840,7 +892,7 @@ mod tests {
     #[test]
     fn adc_7() {
         let c = test_adc(5, -7_i8 as u8, false);
-        assert_eq!(-2_i8 as u8, c.reg_acc);
+        assert_eq!(c.reg_acc, -2_i8 as u8);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_negative_flag(), true);
@@ -849,7 +901,7 @@ mod tests {
     #[test]
     fn adc_8() {
         let c = test_adc(-5_i8 as u8, -7_i8 as u8, false);
-        assert_eq!(-12_i8 as u8, c.reg_acc);
+        assert_eq!(c.reg_acc, -12_i8 as u8);
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_negative_flag(), true);
@@ -858,7 +910,7 @@ mod tests {
     #[test]
     fn adc_9() {
         let c = test_adc(-66_i8 as u8, -65_i8 as u8, false);
-        assert_eq!(125, c.reg_acc);
+        assert_eq!(c.reg_acc, 125);
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_overflow_flag(), true);
     }
@@ -866,7 +918,7 @@ mod tests {
     #[test]
     fn adc_10() {
         let c = test_adc(0, 0, false);
-        assert_eq!(0, c.reg_acc);
+        assert_eq!(c.reg_acc, 0);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_zero_flag(), true);
@@ -876,7 +928,7 @@ mod tests {
     #[test]
     fn adc_11() {
         let c = test_adc(-10_i8 as u8, 10, false);
-        assert_eq!(0, c.reg_acc);
+        assert_eq!(c.reg_acc, 0);
         assert_eq!(c.get_overflow_flag(), false);
         assert_eq!(c.get_zero_flag(), true);
     }
@@ -884,13 +936,13 @@ mod tests {
     #[test]
     fn adc_dec_1() {
         let c = test_dec_adc(0x79, 0x14, false);
-        assert_eq!(0x93, c.reg_acc);
+        assert_eq!(c.reg_acc, 0x93);
     }
 
     #[test]
     fn sbc_1() {
         let c = test_sbc(5, 3, true);
-        assert_eq!(2, c.reg_acc);
+        assert_eq!(c.reg_acc, 2);
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_zero_flag(), false);
         assert_eq!(c.get_negative_flag(), false);
@@ -899,7 +951,7 @@ mod tests {
     #[test]
     fn sbc_2() {
         let c = test_sbc(5, 6, true);
-        assert_eq!(-1_i8 as u8, c.reg_acc);
+        assert_eq!(c.reg_acc, -1_i8 as u8);
         assert_eq!(c.get_carry_flag(), false);
         assert_eq!(c.get_zero_flag(), false);
         assert_eq!(c.get_negative_flag(), true);
@@ -908,7 +960,79 @@ mod tests {
     #[test]
     fn sbc_dec_1() {
         let c = test_dec_sbc(0x44, 0x29, true);
-        assert_eq!(0x15, c.reg_acc);
+        assert_eq!(c.reg_acc, 0x15);
+    }
+
+    #[test]
+    fn and_1() {
+        let c = test_and(0b00110011, 0b11001101);
+        assert_eq!(c.reg_acc, 0b00000001);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), false);
+    }
+
+    #[test]
+    fn and_2() {
+        let c = test_and(0, 0b11111111);
+        assert_eq!(c.reg_acc, 0);
+        assert_eq!(c.get_zero_flag(), true);
+        assert_eq!(c.get_negative_flag(), false);
+    }
+
+    #[test]
+    fn and_3() {
+        let c = test_and(0b11111111, 0b10000000);
+        assert_eq!(c.reg_acc, 0b10000000);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
+    }
+
+    #[test]
+    fn ora_1() {
+        let c = test_ora(0b00110011, 0b11001101);
+        assert_eq!(c.reg_acc, 0b11111111);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
+    }
+
+    #[test]
+    fn ora_2() {
+        let c = test_ora(0, 0);
+        assert_eq!(c.reg_acc, 0);
+        assert_eq!(c.get_zero_flag(), true);
+        assert_eq!(c.get_negative_flag(), false);
+    }
+
+    #[test]
+    fn ora_3() {
+        let c = test_ora(0b10000000, 0b10000000);
+        assert_eq!(c.reg_acc, 0b10000000);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
+    }
+
+    #[test]
+    fn eor_1() {
+        let c = test_eor(0b00110011, 0b11001101);
+        assert_eq!(c.reg_acc, 0b11111110);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
+    }
+
+    #[test]
+    fn eor_2() {
+        let c = test_eor(0, 0);
+        assert_eq!(c.reg_acc, 0);
+        assert_eq!(c.get_zero_flag(), true);
+        assert_eq!(c.get_negative_flag(), false);
+    }
+
+    #[test]
+    fn eor_3() {
+        let c = test_eor(0, 0b10000000);
+        assert_eq!(c.reg_acc, 0b10000000);
+        assert_eq!(c.get_zero_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
     }
 
     // TODO: add test for infamous JMP boundary
