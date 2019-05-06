@@ -6,6 +6,7 @@ use std::process;
 
 use AddrMode::*;
 use Op::*;
+use Operand::*;
 
 pub struct Mem {
     data: [u8; MEM_SIZE],
@@ -397,8 +398,8 @@ impl CPU {
         match op {
             LDA => {
                 match operand {
-                    Operand::Address(addr) => self.reg_acc = self.mem.data[addr as usize],
-                    Operand::Byte(val) => self.reg_acc = val,
+                    Address(addr) => self.reg_acc = self.mem.data[addr as usize],
+                    Byte(val) => self.reg_acc = val,
                     o => panic!("execute: LDA: wrong operand: {:?}", o),
                 }
                 self.update_zero_flag(self.reg_acc == 0);
@@ -406,14 +407,14 @@ impl CPU {
             }
 
             STA => match operand {
-                Operand::Address(addr) => self.mem.data[addr as usize] = self.reg_acc,
+                Address(addr) => self.mem.data[addr as usize] = self.reg_acc,
                 o => panic!("execute: STA: wrong operand: {:?}", o),
             },
 
             ADC => {
                 let m = match operand {
-                    Operand::Byte(val) => val,
-                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    Byte(val) => val,
+                    Address(addr) => self.mem.data[addr as usize],
                     o => panic!("execute: ADC: wrong operand: {:?}", o),
                 };
                 self.adc(m);
@@ -421,8 +422,8 @@ impl CPU {
 
             SBC => {
                 let m = match operand {
-                    Operand::Byte(val) => val,
-                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    Byte(val) => val,
+                    Address(addr) => self.mem.data[addr as usize],
                     o => panic!("execute: SBC: wrong operand: {:?}", o),
                 };
 
@@ -450,8 +451,8 @@ impl CPU {
 
             AND => {
                 let m = match operand {
-                    Operand::Byte(val) => val,
-                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    Byte(val) => val,
+                    Address(addr) => self.mem.data[addr as usize],
                     o => panic!("execute: AND: wrong operand: {:?}", o),
                 };
                 self.reg_acc = self.reg_acc & m;
@@ -461,8 +462,8 @@ impl CPU {
 
             ORA => {
                 let m = match operand {
-                    Operand::Byte(val) => val,
-                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    Byte(val) => val,
+                    Address(addr) => self.mem.data[addr as usize],
                     o => panic!("execute: AND: wrong operand: {:?}", o),
                 };
                 self.reg_acc = self.reg_acc | m;
@@ -472,8 +473,8 @@ impl CPU {
 
             EOR => {
                 let m = match operand {
-                    Operand::Byte(val) => val,
-                    Operand::Address(addr) => self.mem.data[addr as usize],
+                    Byte(val) => val,
+                    Address(addr) => self.mem.data[addr as usize],
                     o => panic!("execute: AND: wrong operand: {:?}", o),
                 };
                 self.reg_acc = self.reg_acc ^ m;
@@ -494,15 +495,15 @@ impl CPU {
 
             JMP => {
                 let addr = match operand {
-                    Operand::Address(addr) => addr,
-                    Operand::JmpAddress(addr) => addr,
+                    Address(addr) => addr,
+                    JmpAddress(addr) => addr,
                     o => panic!("execute: JMP: wrong operand: {:?}", o),
                 };
                 self.ip = addr;
             }
 
             BMI => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if self.get_negative_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -510,7 +511,7 @@ impl CPU {
             }
 
             BPL => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if !self.get_negative_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -518,7 +519,7 @@ impl CPU {
             }
 
             BCS => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if self.get_carry_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -526,7 +527,7 @@ impl CPU {
             }
 
             BCC => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if !self.get_carry_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -534,7 +535,7 @@ impl CPU {
             }
 
             BEQ => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if self.get_zero_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -542,7 +543,7 @@ impl CPU {
             }
 
             BNE => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if !self.get_zero_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -550,7 +551,7 @@ impl CPU {
             }
 
             BVS => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if self.get_overflow_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -558,7 +559,7 @@ impl CPU {
             }
 
             BVC => {
-                if let Operand::Offset(off) = operand {
+                if let Offset(off) = operand {
                     if !self.get_overflow_flag() {
                         self.ip = self.ip.wrapping_add(off as u16);
                     }
@@ -608,26 +609,26 @@ impl CPU {
 
     fn resolve_operand(&self, mode: &AddrMode) -> Operand {
         match mode {
-            Impl => Operand::Implicit,
+            Impl => Implicit,
             Abs => {
                 let lo = self.mem.data[self.ip as usize];
                 let hi = self.mem.data[(self.ip.wrapping_add(1)) as usize];
                 let addr = ((hi as u16) << 8) | (lo as u16);
-                Operand::Address(addr)
+                Address(addr)
             }
             AbsX => {
                 let lo = self.mem.data[self.ip as usize];
                 let hi = self.mem.data[(self.ip.wrapping_add(1)) as usize];
                 let addr = ((hi as u16) << 8) | (lo as u16);
-                Operand::Address(addr.wrapping_add(self.reg_x as u16))
+                Address(addr.wrapping_add(self.reg_x as u16))
             }
             AbsY => {
                 let lo = self.mem.data[self.ip as usize];
                 let hi = self.mem.data[(self.ip.wrapping_add(1)) as usize];
                 let addr = ((hi as u16) << 8) | (lo as u16);
-                Operand::Address(addr.wrapping_add(self.reg_y as u16))
+                Address(addr.wrapping_add(self.reg_y as u16))
             }
-            Imm => Operand::Byte(self.mem.data[self.ip as usize]),
+            Imm => Byte(self.mem.data[self.ip as usize]),
             Ind => {
                 // This addressing mode is only used for JMP. And it
                 // is buggy: an original 6502 does not correctly fetch
@@ -650,7 +651,7 @@ impl CPU {
                     self.mem.data[buggy_hi_addr as usize]
                 };
                 let addr = ((hi as u16) << 8) | (lo as u16);
-                Operand::JmpAddress(addr)
+                JmpAddress(addr)
             }
             IndX => {
                 let indir_lo = self.mem.data[self.ip as usize];
@@ -658,24 +659,24 @@ impl CPU {
                 let lo = self.mem.data[indir_addr as usize];
                 let hi = self.mem.data[indir_addr.wrapping_add(1) as usize];
                 let addr = ((hi as u16) << 8) | (lo as u16);
-                Operand::Address(addr)
+                Address(addr)
             }
             IndY => {
                 let indir_addr = self.mem.data[self.ip as usize];
                 let lo = self.mem.data[indir_addr as usize];
                 let hi = self.mem.data[indir_addr.wrapping_add(1) as usize];
                 let addr = ((hi as u16) << 8) | (lo as u16);
-                Operand::Address(addr.wrapping_add(self.reg_y as u16))
+                Address(addr.wrapping_add(self.reg_y as u16))
             }
-            Rel => Operand::Offset(self.mem.data[self.ip as usize] as i8),
-            Zpg => Operand::Address(self.mem.data[self.ip as usize] as u16),
+            Rel => Offset(self.mem.data[self.ip as usize] as i8),
+            Zpg => Address(self.mem.data[self.ip as usize] as u16),
             ZpgX => {
                 let addr = self.mem.data[self.ip as usize].wrapping_add(self.reg_x);
-                Operand::Address(addr as u16)
+                Address(addr as u16)
             }
             ZpgY => {
                 let addr = self.mem.data[self.ip as usize].wrapping_add(self.reg_y);
-                Operand::Address(addr as u16)
+                Address(addr as u16)
             }
         }
     }
@@ -872,7 +873,7 @@ mod tests {
         if c {
             cpu.set_carry_flag();
         }
-        cpu.execute(ADC, Operand::Byte(m));
+        cpu.execute(ADC, Byte(m));
         cpu
     }
 
@@ -883,7 +884,7 @@ mod tests {
         if c {
             cpu.set_carry_flag();
         }
-        cpu.execute(ADC, Operand::Byte(m));
+        cpu.execute(ADC, Byte(m));
         cpu
     }
 
@@ -893,7 +894,7 @@ mod tests {
         if c {
             cpu.set_carry_flag();
         }
-        cpu.execute(SBC, Operand::Byte(m));
+        cpu.execute(SBC, Byte(m));
         cpu
     }
 
@@ -904,7 +905,7 @@ mod tests {
         if c {
             cpu.set_carry_flag();
         }
-        cpu.execute(SBC, Operand::Byte(m));
+        cpu.execute(SBC, Byte(m));
         cpu
     }
 
@@ -923,7 +924,7 @@ mod tests {
     fn test_bin_op(op: Op, a: u8, m: u8) -> CPU {
         let mut cpu = CPU::new();
         cpu.reg_acc = a;
-        cpu.execute(op, Operand::Byte(m));
+        cpu.execute(op, Byte(m));
         cpu
     }
 
