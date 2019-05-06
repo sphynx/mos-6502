@@ -347,7 +347,6 @@ pub fn disasm(bytes: &[u8]) {
     }
 }
 
-#[allow(unused)]
 impl CPU {
     pub fn new() -> Self {
         CPU {
@@ -480,6 +479,90 @@ impl CPU {
                 self.reg_acc = self.reg_acc ^ m;
                 self.update_zero_flag(self.reg_acc == 0);
                 self.update_negative_flag(self.reg_acc);
+            }
+
+            SEC => self.set_carry_flag(),
+            CLC => self.clear_carry_flag(),
+
+            SEI => self.set_interrupt_flag(),
+            CLI => self.clear_interrupt_flag(),
+
+            SED => self.set_decimal_flag(),
+            CLD => self.clear_decimal_flag(),
+
+            CLV => self.clear_overflow_flag(),
+
+            JMP => {
+                let addr = match operand {
+                    Operand::Address(addr) => addr,
+                    Operand::JmpAddress(addr) => addr,
+                    o => panic!("execute: JMP: wrong operand: {:?}", o),
+                };
+                self.ip = addr;
+            }
+
+            BMI => {
+                if let Operand::Offset(off) = operand {
+                    if self.get_negative_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
+            }
+
+            BPL => {
+                if let Operand::Offset(off) = operand {
+                    if !self.get_negative_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
+            }
+
+            BCS => {
+                if let Operand::Offset(off) = operand {
+                    if self.get_carry_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
+            }
+
+            BCC => {
+                if let Operand::Offset(off) = operand {
+                    if !self.get_carry_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
+            }
+
+            BEQ => {
+                if let Operand::Offset(off) = operand {
+                    if self.get_zero_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
+            }
+
+            BNE => {
+                if let Operand::Offset(off) = operand {
+                    if !self.get_zero_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
+            }
+
+            BVS => {
+                if let Operand::Offset(off) = operand {
+                    if self.get_overflow_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
+            }
+
+            BVC => {
+                if let Operand::Offset(off) = operand {
+                    if !self.get_overflow_flag() {
+                        self.ip = self.ip.wrapping_add(off as u16);
+                    }
+                }
             }
 
             _ => unimplemented!(),
@@ -621,14 +704,17 @@ impl CPU {
         clear_bit(&mut self.reg_status, 6)
     }
 
+    #[allow(unused)]
     fn set_break_flag(&mut self) {
         set_bit(&mut self.reg_status, 4);
     }
 
+    #[allow(unused)]
     fn get_break_flag(&self) -> bool {
         get_bit(self.reg_status, 4)
     }
 
+    #[allow(unused)]
     fn clear_break_flag(&mut self) {
         clear_bit(&mut self.reg_status, 4)
     }
@@ -649,6 +735,7 @@ impl CPU {
         set_bit(&mut self.reg_status, 2);
     }
 
+    #[allow(unused)]
     fn get_interrupt_flag(&self) -> bool {
         get_bit(self.reg_status, 2)
     }
