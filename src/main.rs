@@ -566,6 +566,24 @@ impl CPU {
                 }
             }
 
+            CMP | CPX | CPY => {
+                let reg = match op {
+                    CMP => self.reg_acc,
+                    CPX => self.reg_x,
+                    CPY => self.reg_y,
+                    _ => panic!("execute: CMP: shouldn't happen"),
+                };
+                let m = match operand {
+                    Byte(val) => val,
+                    Address(addr) => self.mem.data[addr as usize],
+                    o => panic!("execute: {:?}: wrong operand: {:?}", op, o),
+                };
+                let res = reg.wrapping_sub(m);
+                self.update_zero_flag(res == 0);
+                self.update_negative_flag(res);
+                self.update_carry_flag(reg >= m);
+            }
+
             _ => unimplemented!(),
         }
     }
@@ -921,6 +939,10 @@ mod tests {
         test_bin_op(EOR, a, m)
     }
 
+    fn test_cmp(a: u8, m: u8) -> CPU {
+        test_bin_op(CMP, a, m)
+    }
+
     fn test_bin_op(op: Op, a: u8, m: u8) -> CPU {
         let mut cpu = CPU::new();
         cpu.reg_acc = a;
@@ -1121,6 +1143,30 @@ mod tests {
         assert_eq!(c.reg_acc, 0b10000000);
         assert_eq!(c.get_zero_flag(), false);
         assert_eq!(c.get_negative_flag(), true);
+    }
+
+    #[test]
+    fn cmp_1() {
+        let c = test_cmp(0x01, 0xFF);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_negative_flag(), false);
+        assert_eq!(c.get_zero_flag(), false);
+    }
+
+    #[test]
+    fn cmp_2() {
+        let c = test_cmp(0x7F, 0x80);
+        assert_eq!(c.get_carry_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
+        assert_eq!(c.get_zero_flag(), false);
+    }
+
+    #[test]
+    fn cmp_3() {
+        let c = test_cmp(0x01, 0x01);
+        assert_eq!(c.get_carry_flag(), true);
+        assert_eq!(c.get_negative_flag(), false);
+        assert_eq!(c.get_zero_flag(), true);
     }
 
     // TODO: add test for infamous JMP boundary
