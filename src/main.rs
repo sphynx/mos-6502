@@ -396,19 +396,33 @@ impl CPU {
 
     fn execute(&mut self, op: Op, operand: Operand) {
         match op {
-            LDA => {
-                match operand {
-                    Address(addr) => self.reg_acc = self.mem.data[addr as usize],
-                    Byte(val) => self.reg_acc = val,
-                    o => panic!("execute: LDA: wrong operand: {:?}", o),
+            LDA | LDX | LDY => {
+                let m = match operand {
+                    Address(addr) => self.mem.data[addr as usize],
+                    Byte(val) => val,
+                    o => panic!("execute: {:?}: wrong operand: {:?}", op, o),
+                };
+                match op {
+                    LDA => self.reg_acc = m,
+                    LDX => self.reg_x = m,
+                    LDY => self.reg_y = m,
+                    _ => panic!("execute: LDA/LDX/LDY: shouldn't happen"),
                 }
-                self.update_zero_flag(self.reg_acc == 0);
-                self.update_negative_flag(self.reg_acc);
+                self.update_zero_flag(m == 0);
+                self.update_negative_flag(m);
             }
 
-            STA => match operand {
-                Address(addr) => self.mem.data[addr as usize] = self.reg_acc,
-                o => panic!("execute: STA: wrong operand: {:?}", o),
+            STA | STX | STY => {
+                let reg = match op {
+                    STA => self.reg_acc,
+                    STX => self.reg_x,
+                    STY => self.reg_y,
+                    _ => panic!("execute: STA/STX/STY: shouldn't happen"),
+                };
+                match operand {
+                    Address(addr) => self.mem.data[addr as usize] = reg,
+                    o => panic!("execute: STA: wrong operand: {:?}", o),
+                }
             },
 
             ADC => {
@@ -593,6 +607,54 @@ impl CPU {
                 self.update_zero_flag(a & m == 0);
                 self.update_negative_flag(m);
                 self.update_overflow_flag(get_bit(m, 6));
+            }
+
+            INX => {
+                self.reg_x = self.reg_x.wrapping_add(1);
+                self.update_negative_flag(self.reg_x);
+                self.update_zero_flag(self.reg_x == 0);
+            }
+
+            DEX => {
+                self.reg_x = self.reg_x.wrapping_sub(1);
+                self.update_negative_flag(self.reg_x);
+                self.update_zero_flag(self.reg_x == 0);
+            }
+
+            INY => {
+                self.reg_y = self.reg_y.wrapping_add(1);
+                self.update_negative_flag(self.reg_y);
+                self.update_zero_flag(self.reg_y == 0);
+            }
+
+            DEY => {
+                self.reg_y = self.reg_x.wrapping_sub(1);
+                self.update_negative_flag(self.reg_y);
+                self.update_zero_flag(self.reg_y == 0);
+            }
+
+            TAX => {
+                self.reg_x = self.reg_acc;
+                self.update_negative_flag(self.reg_x);
+                self.update_zero_flag(self.reg_x == 0);
+            }
+
+            TXA => {
+                self.reg_acc = self.reg_x;
+                self.update_negative_flag(self.reg_acc);
+                self.update_zero_flag(self.reg_acc == 0);
+            }
+
+            TAY => {
+                self.reg_y = self.reg_acc;
+                self.update_negative_flag(self.reg_y);
+                self.update_zero_flag(self.reg_y == 0);
+            }
+
+            TYA => {
+                self.reg_acc = self.reg_y;
+                self.update_negative_flag(self.reg_acc);
+                self.update_zero_flag(self.reg_acc == 0);
             }
 
             _ => unimplemented!(),
@@ -1226,6 +1288,34 @@ mod tests {
         assert_eq!(c.get_negative_flag(), false);
         assert_eq!(c.get_zero_flag(), false);
     }
+
+    #[test]
+    fn lda_ldx_ldy_1() {
+        let mut c = CPU::new();
+        c.execute(LDA, Byte(10));
+        c.execute(LDX, Byte(11));
+        c.execute(LDY, Byte(12));
+        assert_eq!(c.reg_acc, 10);
+        assert_eq!(c.reg_x, 11);
+        assert_eq!(c.reg_y, 12);
+    }
+
+    #[test]
+    fn sta_stx_sty_1() {
+        let mut c = CPU::new();
+        c.reg_acc = 10;
+        c.reg_x = 11;
+        c.reg_y = 12;
+
+        c.execute(STA, Address(0));
+        c.execute(STX, Address(1));
+        c.execute(STY, Address(2));
+
+        assert_eq!(c.mem.data[0], 10);
+        assert_eq!(c.mem.data[1], 11);
+        assert_eq!(c.mem.data[2], 12);
+    }
+
 
     // TODO: add test for infamous JMP boundary
 }
