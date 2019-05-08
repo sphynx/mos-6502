@@ -584,6 +584,17 @@ impl CPU {
                 self.update_carry_flag(reg >= m);
             }
 
+            BIT => {
+                let m = match operand {
+                    Address(addr) => self.mem.data[addr as usize],
+                    _ => panic!("execute: {:?}: wrong operand: {:?}", op, operand),
+                };
+                let a = self.reg_acc;
+                self.update_zero_flag(a & m == 0);
+                self.update_negative_flag(m);
+                self.update_overflow_flag(get_bit(m, 6));
+            }
+
             _ => unimplemented!(),
         }
     }
@@ -824,7 +835,6 @@ fn set_bit(val: &mut u8, bit: usize) {
     *val |= 1_u8 << bit;
 }
 
-#[allow(dead_code)]
 fn clear_bit(val: &mut u8, bit: usize) {
     *val &= !(1_u8 << bit);
 }
@@ -941,6 +951,14 @@ mod tests {
 
     fn test_cmp(a: u8, m: u8) -> CPU {
         test_bin_op(CMP, a, m)
+    }
+
+    fn test_bit(a: u8, m: u8) -> CPU {
+        let mut cpu = CPU::new();
+        cpu.reg_acc = a;
+        cpu.mem.data[0] = m;
+        cpu.execute(BIT, Address(0));
+        cpu
     }
 
     fn test_bin_op(op: Op, a: u8, m: u8) -> CPU {
@@ -1167,6 +1185,46 @@ mod tests {
         assert_eq!(c.get_carry_flag(), true);
         assert_eq!(c.get_negative_flag(), false);
         assert_eq!(c.get_zero_flag(), true);
+    }
+
+    #[test]
+    fn bit_1() {
+        let c = test_bit(0b_0000_1111, 0b_1111_0000);
+        assert_eq!(c.get_overflow_flag(), true);
+        assert_eq!(c.get_negative_flag(), true);
+        assert_eq!(c.get_zero_flag(), true);
+    }
+
+    #[test]
+    fn bit_2() {
+        let c = test_bit(0b_0000_1111, 0b_0111_0000);
+        assert_eq!(c.get_overflow_flag(), true);
+        assert_eq!(c.get_negative_flag(), false);
+        assert_eq!(c.get_zero_flag(), true);
+    }
+
+    #[test]
+    fn bit_3() {
+        let c = test_bit(0b_0000_1111, 0b_1011_0000);
+        assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_negative_flag(), true);
+        assert_eq!(c.get_zero_flag(), true);
+    }
+
+    #[test]
+    fn bit_4() {
+        let c = test_bit(0b_0000_1111, 0b_0011_0000);
+        assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_negative_flag(), false);
+        assert_eq!(c.get_zero_flag(), true);
+    }
+
+    #[test]
+    fn bit_5() {
+        let c = test_bit(0b_0000_1111, 0b_0011_0001);
+        assert_eq!(c.get_overflow_flag(), false);
+        assert_eq!(c.get_negative_flag(), false);
+        assert_eq!(c.get_zero_flag(), false);
     }
 
     // TODO: add test for infamous JMP boundary
